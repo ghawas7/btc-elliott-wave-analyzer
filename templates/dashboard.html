@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC Elliott Wave Analyzer</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --muted: #8b949e;
+            --green: #3fb950;
+            --red: #f85149;
+            --blue: #58a6ff;
+            --yellow: #d2991d;
+            --purple: #bc8cff;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #fff;
+        }
+        header .price-badge {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--green);
+            background: rgba(63,185,80,0.1);
+            padding: 4px 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(63,185,80,0.3);
+        }
+        .timeframe-bar {
+            display: flex;
+            gap: 6px;
+            background: var(--surface);
+            padding: 6px;
+            border-radius: 10px;
+        }
+        .timeframe-bar button {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--muted);
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .timeframe-bar button:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+        .timeframe-bar button.active {
+            background: var(--blue);
+            color: #fff;
+            font-weight: 600;
+        }
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px 24px;
+        }
+        .loading-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(13,17,23,0.7);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+        .loading-overlay.visible { display: flex; }
+        .spinner {
+            width: 48px; height: 48px;
+            border: 3px solid var(--border);
+            border-top-color: var(--blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 360px;
+            gap: 20px;
+        }
+        @media (max-width: 1000px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .card h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #chart { min-height: 500px; }
+        .pattern-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .pattern-badge.bullish { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+        .pattern-badge.bearish { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+        .pattern-badge.neutral { background: rgba(139,148,158,0.15); color: var(--muted); border: 1px solid rgba(139,148,158,0.3); }
+        .confidence-bar {
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+        .confidence-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        .level-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(48,54,61,0.5);
+            font-size: 0.9rem;
+        }
+        .level-row:last-child { border: none; }
+        .level-row .label { color: var(--muted); }
+        .level-row .value { font-weight: 600; font-family: 'SF Mono', monospace; }
+        .level-row .value.invalid { color: var(--red); }
+        .level-row .value.confirm { color: var(--green); }
+        .level-row .value.fib { color: var(--yellow); }
+        .wave-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+        .wave-tag {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            font-family: 'SF Mono', monospace;
+            background: rgba(88,166,255,0.1);
+            color: var(--blue);
+            border: 1px solid rgba(88,166,255,0.2);
+        }
+        .wave-tag.motive { background: rgba(63,185,80,0.1); color: var(--green); border-color: rgba(63,185,80,0.2); }
+        .wave-tag.corrective { background: rgba(248,81,73,0.08); color: var(--red); border-color: rgba(248,81,73,0.2); }
+        .details-list {
+            list-style: none;
+            font-size: 0.85rem;
+            color: var(--muted);
+        }
+        .details-list li {
+            padding: 3px 0;
+            border-bottom: 1px solid rgba(48,54,61,0.3);
+        }
+        .details-list li:last-child { border: none; }
+        .alt-section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+        .alt-section h3 {
+            font-size: 0.9rem;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+        .error-msg {
+            color: var(--red);
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div style="display:flex;align-items:center;gap:16px;">
+            <h1>🔍 BTC Elliott Wave Analyzer</h1>
+            <span class="price-badge" id="priceBadge">$—</span>
+        </div>
+        <div class="timeframe-bar" id="timeframeBar">
+            <button data-tf="15m">15m</button>
+            <button data-tf="1h">1h</button>
+            <button data-tf="4h">4h</button>
+            <button data-tf="1d" class="active">1D</button>
+            <button data-tf="1w">1W</button>
+        </div>
+    </header>
+
+    <div class="loading-overlay" id="loading">
+        <div class="spinner"></div>
+    </div>
+
+    <main>
+        <div class="grid">
+            <div class="card" style="grid-row: span 2;">
+                <div id="chart"></div>
+            </div>
+
+            <div class="card" id="analysisCard">
+                <h2>📊 Pattern Analysis</h2>
+                <div id="analysisContent">
+                    <p style="color:var(--muted);text-align:center;padding:40px;">
+                        Select a timeframe to analyze
+                    </p>
+                </div>
+            </div>
+
+            <div class="card" id="levelsCard">
+                <h2>🎯 Key Levels</h2>
+                <div id="levelsContent"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API = '/api/analyze';
+        let currentTf = '1d';
+        let chartData = null;
+
+        // Timeframe buttons
+        document.querySelectorAll('#timeframeBar button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#timeframeBar button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTf = btn.dataset.tf;
+                loadAnalysis();
+            });
+        });
+
+        function showLoading() { document.getElementById('loading').classList.add('visible'); }
+        function hideLoading() { document.getElementById('loading').classList.remove('visible'); }
+
+        async function loadAnalysis() {
+            showLoading();
+            try {
+                const resp = await fetch(`${API}?timeframe=${currentTf}`);
+                const data = await resp.json();
+                
+                if (data.error) {
+                    document.getElementById('chart').innerHTML = `<div class="error-msg">${data.error}</div>`;
+                    hideLoading();
+                    return;
+                }
+
+                chartData = data;
+                document.getElementById('priceBadge').textContent = 
+                    '$' + data.latest_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+                renderChart(data);
+                renderAnalysis(data.analysis);
+                renderLevels(data.analysis);
+
+            } catch (err) {
+                document.getElementById('chart').innerHTML = `<div class="error-msg">Failed to load: ${err.message}</div>`;
+            }
+            hideLoading();
+        }
+
+        function renderChart(data) {
+            const cd = data.chart_data;
+            const analysis = data.analysis;
+
+            // Candlestick
+            const candle = {
+                type: 'candlestick',
+                x: cd.timestamps,
+                open: cd.opens,
+                high: cd.highs,
+                low: cd.lows,
+                close: cd.closes,
+                name: 'BTC/USD',
+                increasing: {line: {color: '#3fb950'}, fillcolor: '#3fb950'},
+                decreasing: {line: {color: '#f85149'}, fillcolor: '#f85149'},
+                xaxis: 'x',
+                yaxis: 'y',
+            };
+
+            const shapes = [];
+            const annotations = [];
+            const traces = [candle];
+
+            // Color per pattern
+            const patternColors = {
+                '5-Wave Impulse': '#3fb950',
+                'ABC Zigzag (5-3-5)': '#f85149',
+                'Ending Diagonal': '#d2991d',
+                'Leading Expanding Diagonal': '#d2991d',
+                'Contracting Triangle': '#58a6ff',
+                'Expanding Triangle': '#bc8cff',
+            };
+            const waveColor = patternColors[analysis.pattern_type] || '#8b949e';
+
+            // Draw wave labels on chart
+            if (analysis.waves && analysis.waves.length > 0 && cd.timestamps.length > 0) {
+                analysis.waves.forEach((w, i) => {
+                    // Connector line between wave start and end
+                    const startTs = cd.timestamps[w.start_idx] || cd.timestamps[0];
+                    const endTs = cd.timestamps[w.end_idx] || cd.timestamps[cd.timestamps.length - 1];
+
+                    shapes.push({
+                        type: 'line',
+                        x0: startTs, y0: w.start_price,
+                        x1: endTs, y1: w.end_price,
+                        line: { color: waveColor, width: 2, dash: 'dot' },
+                        xref: 'x', yref: 'y',
+                    });
+
+                    // Label at midpoint
+                    const midIdx = Math.floor((w.start_idx + w.end_idx) / 2);
+                    const midTs = cd.timestamps[Math.min(midIdx, cd.timestamps.length - 1)];
+                    annotations.push({
+                        x: midTs,
+                        y: w.start_price > w.end_price ? w.start_price : w.end_price,
+                        text: `<b>${w.label}</b>`,
+                        showarrow: false,
+                        font: { color: waveColor, size: 13 },
+                        bgcolor: 'rgba(13,17,23,0.85)',
+                        borderpad: 4,
+                        xref: 'x', yref: 'y',
+                    });
+                });
+            }
+
+            // Highlight swing points
+            if (analysis.swings && analysis.swings.length > 0) {
+                const swingX = [];
+                const swingY = [];
+                analysis.swings.forEach(s => {
+                    if (s.index < cd.timestamps.length) {
+                        swingX.push(cd.timestamps[s.index]);
+                        swingY.push(s.price);
+                    }
+                });
+
+                traces.push({
+                    type: 'scatter',
+                    x: swingX,
+                    y: swingY,
+                    mode: 'markers',
+                    marker: { color: waveColor, size: 10, symbol: 'circle-open', line: {width: 2} },
+                    name: 'Swing Points',
+                    xaxis: 'x',
+                    yaxis: 'y',
+                });
+            }
+
+            // Fibonacci levels as horizontal lines
+            if (analysis.fib_levels) {
+                const fib = analysis.fib_levels;
+                const fibLines = [
+                    { label: '0%', value: fib.high, color: '#8b949e' },
+                    { label: '38.2%', value: fib.retrace_382, color: 'rgba(210,153,29,0.6)' },
+                    { label: '50%', value: fib.retrace_500, color: 'rgba(210,153,29,0.5)' },
+                    { label: '61.8%', value: fib.retrace_618, color: 'rgba(210,153,29,0.7)' },
+                    { label: '78.6%', value: fib.retrace_786, color: 'rgba(210,153,29,0.4)' },
+                    { label: '100%', value: fib.low, color: '#8b949e' },
+                    { label: '127.2%', value: fib.extension_1272, color: 'rgba(88,166,255,0.5)' },
+                    { label: '161.8%', value: fib.extension_1618, color: 'rgba(88,166,255,0.6)' },
+                ];
+
+                fibLines.forEach(fl => {
+                    if (fl.value && isFinite(fl.value)) {
+                        shapes.push({
+                            type: 'line',
+                            x0: cd.timestamps[0], y0: fl.value,
+                            x1: cd.timestamps[cd.timestamps.length - 1], y1: fl.value,
+                            line: { color: fl.color, width: 1, dash: 'dash' },
+                            xref: 'x', yref: 'y',
+                        });
+                        annotations.push({
+                            x: cd.timestamps[cd.timestamps.length - 1],
+                            y: fl.value,
+                            text: fl.label,
+                            showarrow: false,
+                            font: { color: fl.color, size: 10 },
+                            xanchor: 'left',
+                            xref: 'x', yref: 'y',
+                        });
+                    }
+                });
+            }
+
+            // Invalidation & confirmation
+            if (analysis.invalidation_level) {
+                shapes.push({
+                    type: 'line',
+                    x0: cd.timestamps[0], y0: analysis.invalidation_level,
+                    x1: cd.timestamps[cd.timestamps.length - 1], y1: analysis.invalidation_level,
+                    line: { color: '#f85149', width: 2, dash: 'dash' },
+                    xref: 'x', yref: 'y',
+                });
+                annotations.push({
+                    x: cd.timestamps[0], y: analysis.invalidation_level,
+                    text: 'INVALID',
+                    showarrow: false,
+                    font: { color: '#f85149', size: 10 },
+                    xanchor: 'right',
+                    xref: 'x', yref: 'y',
+                });
+            }
+
+            if (analysis.confirmation_level) {
+                shapes.push({
+                    type: 'line',
+                    x0: cd.timestamps[0], y0: analysis.confirmation_level,
+                    x1: cd.timestamps[cd.timestamps.length - 1], y1: analysis.confirmation_level,
+                    line: { color: '#3fb950', width: 2, dash: 'dash' },
+                    xref: 'x', yref: 'y',
+                });
+                annotations.push({
+                    x: cd.timestamps[0], y: analysis.confirmation_level,
+                    text: 'CONFIRM',
+                    showarrow: false,
+                    font: { color: '#3fb950', size: 10 },
+                    xanchor: 'right',
+                    xref: 'x', yref: 'y',
+                });
+            }
+
+            const layout = {
+                template: 'plotly_dark',
+                paper_bgcolor: '#161b22',
+                plot_bgcolor: '#161b22',
+                margin: { l: 60, r: 80, t: 10, b: 50 },
+                xaxis: {
+                    title: '',
+                    gridcolor: 'rgba(48,54,61,0.3)',
+                    showgrid: true,
+                },
+                yaxis: {
+                    title: 'Price (USD)',
+                    gridcolor: 'rgba(48,54,61,0.3)',
+                    showgrid: true,
+                    side: 'right',
+                },
+                shapes: shapes,
+                annotations: annotations,
+                showlegend: true,
+                legend: { x: 0.01, y: 0.99, bgcolor: 'rgba(22,27,34,0.8)' },
+                hovermode: 'x unified',
+            };
+
+            Plotly.newPlot('chart', traces, layout, {
+                responsive: true,
+                displayModeBar: true,
+                modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+            });
+        }
+
+        function renderAnalysis(analysis) {
+            if (!analysis) return;
+
+            const isBullish = analysis.summary && analysis.summary.toLowerCase().includes('bull');
+            const isBearish = analysis.summary && analysis.summary.toLowerCase().includes('bear');
+            const badgeClass = isBullish ? 'bullish' : isBearish ? 'bearish' : 'neutral';
+            const confColor = analysis.confidence >= 0.7 ? '#3fb950' : 
+                             analysis.confidence >= 0.4 ? '#d2991d' : '#f85149';
+
+            let html = `
+                <span class="pattern-badge ${badgeClass}">${analysis.pattern_type}</span>
+                <div style="margin-top:12px;">
+                    <div style="display:flex;justify-content:space-between;font-size:0.85rem;color:var(--muted);">
+                        <span>Confidence</span><span>${(analysis.confidence*100).toFixed(0)}%</span>
+                    </div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" style="width:${analysis.confidence*100}%;background:${confColor};"></div>
+                    </div>
+                </div>
+                <p style="margin-top:10px;font-size:0.9rem;color:var(--text);">${analysis.summary}</p>
+            `;
+
+            // Wave labels
+            if (analysis.waves && analysis.waves.length > 0) {
+                html += '<div class="wave-list">';
+                analysis.waves.forEach(w => {
+                    const isMotive = ['1','3','5','(1)','(3)','(5)','A','C','(A)','(C)'].includes(w.label.replace(/\s/g,''));
+                    const cls = isMotive ? 'motive' : 'corrective';
+                    const arrow = w.pct_change >= 0 ? '↑' : '↓';
+                    html += `<span class="wave-tag ${cls}">${w.label} ${arrow}${Math.abs(w.pct_change).toFixed(1)}%</span>`;
+                });
+                html += '</div>';
+            }
+
+            // Details
+            if (analysis.details && analysis.details.length > 0) {
+                html += '<ul class="details-list" style="margin-top:12px;">';
+                analysis.details.forEach(d => { html += `<li>${d}</li>`; });
+                html += '</ul>';
+            }
+
+            // Alternate count
+            if (analysis.alternate) {
+                html += `
+                    <div class="alt-section">
+                        <h3>🔄 Alternate Count</h3>
+                        <span class="pattern-badge neutral" style="font-size:0.8rem;">${analysis.alternate.pattern_type}</span>
+                        <span style="font-size:0.8rem;color:var(--muted);margin-left:8px;">${(analysis.alternate.confidence*100).toFixed(0)}% confidence</span>
+                    </div>
+                `;
+            }
+
+            document.getElementById('analysisContent').innerHTML = html;
+        }
+
+        function renderLevels(analysis) {
+            if (!analysis) { document.getElementById('levelsContent').innerHTML = ''; return; }
+
+            let html = '';
+
+            // Invalidation
+            if (analysis.invalidation_level) {
+                html += `
+                    <div class="level-row">
+                        <span class="label">❌ Invalidation</span>
+                        <span class="value invalid">$${analysis.invalidation_level.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                `;
+            }
+
+            // Confirmation
+            if (analysis.confirmation_level) {
+                html += `
+                    <div class="level-row">
+                        <span class="label">✅ Confirmation</span>
+                        <span class="value confirm">$${analysis.confirmation_level.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                `;
+            }
+
+            // Fibonacci levels
+            if (analysis.fib_levels) {
+                const fib = analysis.fib_levels;
+                html += `
+                    <div class="level-row" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">
+                        <span class="label" style="color:var(--text);font-weight:600;">📐 Fibonacci Levels</span>
+                    </div>
+                    <div class="level-row">
+                        <span class="label">0% (Start)</span>
+                        <span class="value fib">$${fib.high.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="level-row">
+                        <span class="label">38.2%</span>
+                        <span class="value fib">$${fib.retrace_382.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="level-row">
+                        <span class="label">50%</span>
+                        <span class="value fib">$${fib.retrace_500.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="level-row">
+                        <span class="label">61.8%</span>
+                        <span class="value fib">$${fib.retrace_618.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="level-row">
+                        <span class="label">78.6%</span>
+                        <span class="value fib">$${fib.retrace_786.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="level-row">
+                        <span class="label">100% (End)</span>
+                        <span class="value fib">$${fib.low.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="level-row" style="margin-top:4px;border-top:1px solid var(--border);padding-top:4px;">
+                        <span class="label">127.2% Ext</span>
+                        <span class="value" style="color:var(--blue);">$${fib.extension_1272.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="level-row">
+                        <span class="label">161.8% Ext</span>
+                        <span class="value" style="color:var(--blue);">$${fib.extension_1618.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </div>
+                `;
+            }
+
+            document.getElementById('levelsContent').innerHTML = html || '<p style="color:var(--muted);">No levels calculated</p>';
+        }
+
+        // Load on page ready
+        loadAnalysis();
+    </script>
+</body>
+</html>
