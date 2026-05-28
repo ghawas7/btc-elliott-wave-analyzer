@@ -16,9 +16,12 @@ from web.fetcher import fetch_btc_data, prepare_analysis_data, TIMEFRAME_CONFIG
 
 app = FastAPI(title="BTC Elliott Wave Analyzer", version="1.0.0")
 
-# Mount static files
+# Mount static files (safe)
 static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+try:
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+except Exception:
+    pass
 
 
 def pattern_to_dict(result):
